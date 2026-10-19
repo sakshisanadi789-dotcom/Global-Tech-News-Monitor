@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Daily Global Tech News</title>
+    <style>
+        :root {
+            color-scheme: light;
+            font-family: "Segoe UI", Arial, sans-serif;
+            color: #172033;
+            background: #f3f6fb;
+        }
+
+        body {
+            max-width: 960px;
+            margin: 0 auto;
+            padding: 32px 20px;
+        }
+
+        header, .controls, .news-card {
+            background: #fff;
+            border: 1px solid #dce3ee;
+            border-radius: 12px;
+        }
+
+        header {
+            padding: 24px;
+            margin-bottom: 20px;
+            background: #14213d;
+            color: #fff;
+        }
+
+        header p {
+            margin-bottom: 0;
+            color: #d9e4f5;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            align-items: end;
+            padding: 16px;
+            margin-bottom: 16px;
+        }
+
+        label {
+            display: grid;
+            flex: 1 1 220px;
+            gap: 6px;
+            font-weight: 600;
+        }
+
+        input, select, button {
+            min-height: 40px;
+            padding: 8px 10px;
+            border: 1px solid #b8c4d6;
+            border-radius: 7px;
+            font: inherit;
+        }
+
+        button {
+            cursor: pointer;
+            border-color: #2458a6;
+            background: #2458a6;
+            color: #fff;
+            font-weight: 600;
+        }
+
+        button:hover {
+            background: #183f7d;
+        }
+
+        #status {
+            min-height: 24px;
+            color: #43516a;
+        }
+
+        .news-card {
+            padding: 18px;
+            margin: 12px 0;
+        }
+
+        .news-card h2 {
+            margin: 0 0 8px;
+            font-size: 1.2rem;
+        }
+
+        .news-card p {
+            line-height: 1.5;
+        }
+
+        .metadata {
+            color: #526078;
+            font-size: 0.9rem;
+        }
+
+        a {
+            color: #1d4f91;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Daily Global Tech News</h1>
+        <p>Browse collected technology stories or filter by keyword and category.</p>
+    </header>
+
+    <form class="controls" id="news-search">
+        <label for="keyword">
+            Search keyword
+            <input id="keyword" name="keyword" type="search" placeholder="For example, Python">
+        </label>
+        <label for="category">
+            Category
+            <select id="category" name="category">
+                <option value="">All categories</option>
+                {% for category in categories %}
+                <option value="{{ category }}">{{ category }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <button type="submit">Search news</button>
+    </form>
+
+    <form class="controls" id="schedule-settings">
+        <label for="schedule-interval">
+            Automatically collect news
+            <select id="schedule-interval" name="interval">
+                <option value="1m">Every minute</option>
+                <option value="5m">Every 5 minutes</option>
+                <option value="1h">Every hour</option>
+                <option value="1d">Every day</option>
+            </select>
+        </label>
+        <button type="submit">Save schedule</button>
+    </form>
+    <p id="schedule-status" role="status" aria-live="polite">Loading schedule...</p>
+    <p id="status" role="status" aria-live="polite">Loading news...</p>
+    <main id="news-list" aria-label="Technology news"></main>
+
+    <script>
+        const searchForm = document.querySelector("#news-search");
+        const keywordInput = document.querySelector("#keyword");
+        const categorySelect = document.querySelector("#category");
+        const statusMessage = document.querySelector("#status");
+        const scheduleForm = document.querySelector("#schedule-settings");
+        const scheduleSelect = document.querySelector("#schedule-interval");
+        const scheduleStatus = document.querySelector("#schedule-status");
+        const newsList = document.querySelector("#news-list");
+        let refreshTimer;
+        const refreshDelays = {
+            "1m": 60_000,
+            "5m": 5 * 60_000,
+            "1h": 60 * 60_000,
+            "1d": 24 * 60 * 60_000,
+        };
+
+        function scheduleAutoRefresh(interval, nextRunTime) {
+            window.clearTimeout(refreshTimer);
+            const delayUntilNextRun = nextRunTime
+                ? Date.parse(nextRunTime) - Date.now() + 15_000
+                : refreshDelays[interval] + 15_000;
+            scheduleStatus.textContent =
+                `Automatic news collection is set to ${scheduleSelect.selectedOptions[0].text.toLowerCase()}; this page refreshes shortly after each collection.`;
+            refreshTimer = window.setTimeout(async () => {
+                await loadNews();
+                await loadSchedule();
+            }, Math.max(1_000, delayUntilNextRun));
+        }
+
+        function showArticles(articles) {
+            newsList.replaceChildren();
+
+            for (const article of articles) {
+                const card = document.createElement("article");
+                card.className = "news-card";
+
+                const title = document.createElement("h2");
+                title.textContent = article.title;
+
+                const description = document.createElement("p");
+                description.textContent = article.description || "No description provided.";
+
+                const details = document.createElement("p");
+                details.className = "metadata";
+                details.textContent = `${article.category} · ${article.source}`;
+
+                const link = document.createElement("a");
+                link.href = article.url;
+                link.target = "_blank";
+                link.rel = "noopener noreferrer";
+                link.textContent = "Read source article";
+
+                card.append(title, description, details, link);
+                newsList.append(card);
+            }
+
+            statusMessage.textContent = articles.length
+                ? `Showing ${articles.length} article(s).`
+                : "No articles found. Try another search.";
+        }
+
+        async function loadNews() {
+            statusMessage.textContent = "Loading news...";
+            newsList.replaceChildren();
+
+            const keyword = keywordInput.value.trim();
+            const category = categorySelect.value;
+            let endpoint = "/news?limit=20";
+
+            if (keyword) {
+                endpoint = `/news/search?keyword=${encodeURIComponent(keyword)}&limit=20`;
+            } else if (category) {
+                endpoint = `/news/category/${encodeURIComponent(category)}?limit=20`;
+            }
+
+            try {
+                const response = await fetch(endpoint);
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not load news.");
+                }
+                showArticles(data.news);
+            } catch (error) {
+                statusMessage.textContent = error.message;
+            }
+        }
+
+        searchForm.addEventListener("submit", (event) => {
+            event.preventDefault();
+            loadNews();
+        });
+
+        scheduleForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            scheduleStatus.textContent = "Saving schedule...";
+            try {
+                const response = await fetch("/schedule", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify({interval: scheduleSelect.value}),
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not save schedule.");
+                }
+                scheduleAutoRefresh(data.interval, data.next_run_time);
+            } catch (error) {
+                scheduleStatus.textContent = error.message;
+            }
+        });
+
+        async function loadSchedule() {
+            try {
+                const response = await fetch("/schedule");
+                const data = await response.json();
+                if (!response.ok) {
+                    throw new Error(data.error || "Could not load schedule.");
+                }
+                scheduleSelect.value = data.interval;
+                scheduleAutoRefresh(data.interval, data.next_run_time);
+            } catch (error) {
+                scheduleStatus.textContent = error.message;
+            }
+        }
+
+        loadNews();
+        loadSchedule();
+    </script>
+</body>
+</html>

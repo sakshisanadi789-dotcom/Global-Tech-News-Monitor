@@ -1,0 +1,7 @@
+python-dotenv
+pymongo
+requests
+tzdata
+APScheduler>=3.10,<4
+Flask>=3.0,<4
+playwright>=1.50,<2
